@@ -2,15 +2,15 @@ import UIKit
 import SwiftUI
 
 enum AppColors {
-    static let background = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.035, green: 0.043, blue: 0.055, alpha: 1) : .systemGroupedBackground }
-    static let surface = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.075, green: 0.09, blue: 0.115, alpha: 1) : .secondarySystemGroupedBackground }
-    static let elevatedSurface = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.12, green: 0.14, blue: 0.17, alpha: 1) : .white }
+    static let background = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.035, green: 0.047, blue: 0.082, alpha: 1) : UIColor(red: 0.955, green: 0.965, blue: 0.985, alpha: 1) }
+    static let surface = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.075, green: 0.098, blue: 0.16, alpha: 1) : .white }
+    static let elevatedSurface = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.12, green: 0.15, blue: 0.20, alpha: 1) : UIColor(red: 0.985, green: 0.99, blue: 1, alpha: 1) }
     static let primaryText = UIColor.label
     static let secondaryText = UIColor.secondaryLabel
-    static let accent = UIColor(red: 0.25, green: 0.55, blue: 0.92, alpha: 1)
-    static let success = UIColor.systemGreen
-    static let warning = UIColor.systemOrange
-    static let danger = UIColor.systemRed
+    static let accent = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.40, green: 0.57, blue: 1.0, alpha: 1) : UIColor(red: 0.19, green: 0.36, blue: 0.86, alpha: 1) }
+    static let success = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.24, green: 0.83, blue: 0.58, alpha: 1) : UIColor(red: 0.08, green: 0.60, blue: 0.38, alpha: 1) }
+    static let warning = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 1.0, green: 0.66, blue: 0.28, alpha: 1) : UIColor(red: 0.83, green: 0.45, blue: 0.08, alpha: 1) }
+    static let danger = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 1.0, green: 0.35, blue: 0.42, alpha: 1) : UIColor(red: 0.78, green: 0.12, blue: 0.20, alpha: 1) }
     static let separator = UIColor.separator
 }
 enum AppTypography {
