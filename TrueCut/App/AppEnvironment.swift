@@ -10,8 +10,10 @@ struct AppEnvironment {
     static let live: AppEnvironment = {
         let storage = LocalProofRepository()
         #if canImport(C2PA)
+        AppLogger.step("Environment: C2PAContentCredentialsService selected")
         let credentials: ContentCredentialsService = C2PAContentCredentialsService()
         #else
+        AppLogger.failure("Environment: UnsupportedContentCredentialsService selected because C2PA is unavailable")
         let credentials: ContentCredentialsService = UnsupportedContentCredentialsService()
         #endif
         return AppEnvironment(proofRepository: storage, digestService: StreamingFileDigestService(), signingService: KeychainEvidenceSigningService(), credentialsService: credentials, comparisonService: LocalMediaComparisonService(digestService: StreamingFileDigestService()))
