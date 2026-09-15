@@ -2,6 +2,7 @@ import UIKit
 import AVKit
 import UniformTypeIdentifiers
 import LocalAuthentication
+import PhotosUI
 
 private final class ProofCard: UIView {
     let stack = UIStackView()
@@ -64,16 +65,59 @@ final class CompareViewController: UIViewController, UIDocumentPickerDelegate {
     private let original: URL; private let environment: AppEnvironment; private let result = proofLabel("Select another MP4 or MOV to compare locally.", color: AppColors.secondaryText)
     init(original: URL, environment: AppEnvironment) { self.original = original; self.environment = environment; super.init(nibName: nil, bundle: nil) }; required init?(coder: NSCoder) { fatalError("Programmatic controller") }
     override func viewDidLoad() { super.viewDidLoad(); title = "Compare"; view.backgroundColor = AppColors.background; let stack = makeScrollStack(on: view); let card = ProofCard(); card.stack.addArrangedSubview(proofLabel("COMPARE WITH ORIGINAL", style: AppTypography.caption.withWeight(.bold), color: AppColors.accent)); card.stack.addArrangedSubview(result); stack.addArrangedSubview(card); let button = UIBuilder.button("Choose Candidate Video", image: AppIcons.folder); button.addTarget(self, action: #selector(pick), for: .touchUpInside); stack.addArrangedSubview(button) }
-    @objc private func pick() { let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.movie]); picker.delegate = self; present(picker, animated: true) }
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { guard let candidate = urls.first else { return }; result.text = "Comparing locally…"; Task { let comparison = try? await environment.comparisonService.compare(original: original, candidate: candidate); await MainActor.run { self.result.text = comparison?.identical == true ? "FILES IDENTICAL\n\nThe candidate matches the protected original digest." : "FILES DIFFER\n\nThe selected file is not identical to this protected TrueCut original." } } }
+    @objc private func pick() { let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.movie, UTType.image]); picker.delegate = self; present(picker, animated: true) }
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { guard let candidate = urls.first else { return }; result.text = "Comparing locally…\n\nDigesting both files\nReading media properties\nChecking Content Credentials"; result.font = AppTypography.mono; Task { let comparison = try? await environment.comparisonService.compare(original: original, candidate: candidate); let provenance = try? await environment.credentialsService.verify(assetURL: candidate); await MainActor.run { self.showResult(comparison: comparison, provenance: provenance) } }
+    }
+    private func showResult(comparison: MediaComparisonResult?, provenance: ProvenanceResult?) {
+        guard let comparison else { result.text = "Comparison could not be completed."; result.font = AppTypography.body; return }
+        if comparison.identical { result.attributedText = formattedComparisonText("PROTECTED ORIGINAL\n\nThe selected file has the same cryptographic digest as the TrueCut original.", headlineColor: AppColors.success); result.textColor = AppColors.success; result.accessibilityLabel = "Protected original. The selected file matches the TrueCut original."; return }
+        var lines = ["NOT THE PROTECTED ORIGINAL", "", "This file is different from the protected TrueCut original. Its original integrity can no longer be confirmed.", "", "EVIDENCE FOUND"]
+        lines.append(contentsOf: comparison.differences.dropFirst().map { "• \($0)" })
+        lines.append("")
+        if let provenance {
+            switch provenance.status {
+            case .verifiedOriginal, .verifiedDerivative: lines.append("C2PA PROVENANCE\n\(provenance.message)\(provenance.actions.isEmpty ? "" : "\nDeclared actions: \(provenance.actions.joined(separator: ", "))")")
+            case .integrityFailure: lines.append("C2PA INTEGRITY FAILURE\nThe Content Credentials are present, but their asset binding did not validate.")
+            case .unavailable, .incomplete: lines.append("C2PA PROVENANCE UNAVAILABLE\nNo supported edit history was found. The file may have been edited, re-exported, or had its credentials removed.")
+            }
+        }
+        lines.append("\nTrueCut cannot determine who edited the file or the exact timeline unless the editing application preserved valid provenance.")
+        result.attributedText = formattedComparisonText(lines.joined(separator: "\n"), headlineColor: AppColors.danger); result.textColor = AppColors.danger; result.accessibilityLabel = "Not the protected original. The selected file is different from the protected TrueCut original."
+    }
+    private func formattedComparisonText(_ text: String, headlineColor: UIColor) -> NSAttributedString { let output = NSMutableAttributedString(string: text, attributes: [.font: AppTypography.body, .foregroundColor: headlineColor]); if let range = text.range(of: "\n") { output.addAttributes([.font: AppTypography.headline.withWeight(.bold), .foregroundColor: headlineColor], range: NSRange(text.startIndex..<range.lowerBound, in: text)) }; return output }
 }
 
-final class InspectorViewController: UIViewController, UIDocumentPickerDelegate {
+final class InspectorViewController: UIViewController, UIDocumentPickerDelegate, PHPickerViewControllerDelegate {
     private let environment: AppEnvironment; private let result = proofLabel("Inspect a video\n\nCheck supported provenance and integrity information for a video you've received.", style: AppTypography.title)
     init(environment: AppEnvironment) { self.environment = environment; super.init(nibName: nil, bundle: nil) }; required init?(coder: NSCoder) { fatalError("Programmatic controller") }
-    override func viewDidLoad() { super.viewDidLoad(); title = "Inspect"; view.backgroundColor = AppColors.background; let stack = makeScrollStack(on: view); let card = ProofCard(); card.stack.addArrangedSubview(proofLabel("LOCAL INSPECTION", style: AppTypography.caption.withWeight(.bold), color: AppColors.accent)); result.textAlignment = .left; card.stack.addArrangedSubview(result); stack.addArrangedSubview(card); let button = UIBuilder.button("Choose Video", image: AppIcons.folder); button.addTarget(self, action: #selector(pick), for: .touchUpInside); stack.addArrangedSubview(button) }
-    @objc private func pick() { let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.movie]); picker.delegate = self; present(picker, animated: true) }
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { guard let url = urls.first else { return }; result.text = "ANALYZING\n\nReading file\nChecking Content Credentials\nValidating provenance"; Task { let provenance = try? await environment.credentialsService.verify(assetURL: url); await MainActor.run { self.result.text = provenance?.message ?? "Unable to inspect this file."; self.result.font = AppTypography.body } } }
+    override func viewDidLoad() { super.viewDidLoad(); title = "Inspect"; view.backgroundColor = AppColors.background; let stack = makeScrollStack(on: view); let card = ProofCard(); card.stack.addArrangedSubview(proofLabel("LOCAL INSPECTION", style: AppTypography.caption.withWeight(.bold), color: AppColors.accent)); result.textAlignment = .left; card.stack.addArrangedSubview(result); stack.addArrangedSubview(card); let button = UIBuilder.button("Choose Photo or Video", image: UIImage(systemName: "photo.on.rectangle")); button.addTarget(self, action: #selector(pick), for: .touchUpInside); stack.addArrangedSubview(button) }
+    @objc private func pick() {
+        let sheet = UIAlertController(title: "Inspect Media", message: "Choose where the photo or video is stored.", preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "Photo & Video Library", style: .default) { [weak self] _ in self?.pickFromLibrary() })
+        sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in self?.pickFromFiles() })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = sheet.popoverPresentationController { popover.sourceView = view; popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 120, width: 1, height: 1) }
+        present(sheet, animated: true)
+    }
+    private func pickFromLibrary() {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared()); configuration.filter = .any(of: [.images, .videos]); configuration.selectionLimit = 1; configuration.preferredAssetRepresentationMode = .current
+        let picker = PHPickerViewController(configuration: configuration); picker.delegate = self; present(picker, animated: true)
+    }
+    private func pickFromFiles() { let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.movie, UTType.image]); picker.delegate = self; present(picker, animated: true) }
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { guard let url = urls.first else { return }; inspect(url: url) }
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true); guard let result = results.first else { return }; let provider = result.itemProvider
+        let type = provider.registeredTypeIdentifiers.compactMap { UTType($0) }.first(where: { $0.conforms(to: .movie) || $0.conforms(to: .image) })
+        guard let type else { showInspectionError("This item cannot be read by TrueCut."); return }
+        provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { [weak self] temporaryURL, error in
+            guard let self, let temporaryURL, error == nil else { DispatchQueue.main.async { self?.showInspectionError("TrueCut could not read this item from the Photo & Video Library.") }; return }
+            let ext = temporaryURL.pathExtension.isEmpty ? (type.conforms(to: .movie) ? "mov" : "jpg") : temporaryURL.pathExtension
+            let destination = FileManager.default.temporaryDirectory.appendingPathComponent("truecut-inspect-\(UUID().uuidString).\(ext)")
+            do { try FileManager.default.copyItem(at: temporaryURL, to: destination); DispatchQueue.main.async { self.inspect(url: destination) } } catch { DispatchQueue.main.async { self.showInspectionError("TrueCut could not prepare this item for local inspection.") } }
+        }
+    }
+    private func inspect(url: URL) { result.text = "ANALYZING\n\nReading file\nChecking Content Credentials\nValidating provenance"; result.font = AppTypography.mono; Task { let provenance = try? await environment.credentialsService.verify(assetURL: url); await MainActor.run { self.result.text = provenance?.message ?? "Unable to inspect this file."; self.result.font = AppTypography.body } } }
+    private func showInspectionError(_ message: String) { result.text = message; result.font = AppTypography.body; result.textColor = AppColors.warning }
 }
 
 final class SettingsViewController: UIViewController {

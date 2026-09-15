@@ -173,9 +173,22 @@ final class LocalMediaComparisonService: MediaComparisonService {
     let digestService: FileDigestService
     init(digestService: FileDigestService) { self.digestService = digestService }
     func compare(original: URL, candidate: URL) async throws -> MediaComparisonResult {
-        let a = try await digestService.sha256(of: original).sha256Hex; let b = try await digestService.sha256(of: candidate).sha256Hex
-        return MediaComparisonResult(identical: a == b, originalDigest: a, candidateDigest: b, differences: a == b ? [] : ["File digest"])
+        try await Task.detached(priority: .userInitiated) {
+            let a = try await self.digestService.sha256(of: original).sha256Hex; let b = try await self.digestService.sha256(of: candidate).sha256Hex
+            guard a != b else { return MediaComparisonResult(identical: true, originalDigest: a, candidateDigest: b, differences: []) }
+            var differences = ["Cryptographic digest"]
+            let left = Self.mediaInfo(for: original); let right = Self.mediaInfo(for: candidate)
+            if left.duration > 0, right.duration > 0, abs(left.duration - right.duration) > 0.05 { differences.append(String(format: "Duration changed: %@ → %@", Self.formatDuration(left.duration), Self.formatDuration(right.duration))) }
+            if left.width > 0, right.width > 0, left.width != right.width || left.height != right.height { differences.append("Resolution changed: \(left.width) × \(left.height) → \(right.width) × \(right.height) (possible crop or resize)") }
+            if left.frameRate > 0, right.frameRate > 0, abs(left.frameRate - right.frameRate) > 0.1 { differences.append(String(format: "Frame rate changed: %.1f FPS → %.1f FPS", left.frameRate, right.frameRate)) }
+            if left.hasAudio != right.hasAudio { differences.append(left.hasAudio ? "Audio track removed" : "Audio track added") }
+            let leftSize = (try? FileManager.default.attributesOfItem(atPath: original.path)[.size] as? Int64) ?? 0; let rightSize = (try? FileManager.default.attributesOfItem(atPath: candidate.path)[.size] as? Int64) ?? 0
+            if leftSize > 0, rightSize > 0, leftSize != rightSize { differences.append("File size changed") }
+            return MediaComparisonResult(identical: false, originalDigest: a, candidateDigest: b, differences: differences)
+        }.value
     }
+    private static func mediaInfo(for url: URL) -> (duration: Double, width: Int, height: Int, frameRate: Double, hasAudio: Bool) { let asset = AVAsset(url: url); let duration = asset.duration.seconds.isFinite ? asset.duration.seconds : 0; let track = asset.tracks(withMediaType: .video).first; let size = track?.naturalSize.applying(track?.preferredTransform ?? .identity) ?? .zero; return (duration, Int(abs(size.width)), Int(abs(size.height)), Double(track?.nominalFrameRate ?? 0), !asset.tracks(withMediaType: .audio).isEmpty) }
+    private static func formatDuration(_ seconds: Double) -> String { String(format: "%02d:%02d", Int(seconds) / 60, Int(seconds) % 60) }
 }
 
 final class LocalProofRepository: ProofRepository {
